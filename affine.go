@@ -17,7 +17,7 @@ type Affine struct {
 
 type Vec interface {
 	XY() (float32, float32)
-	Project(Affine) (float32, float32)
+	Project(*Affine) (float32, float32)
 }
 
 type Point struct {
@@ -28,22 +28,54 @@ type Move struct {
 	X, Y float32
 }
 
-func (p Point) Project(a Affine) (float32, float32) {
+//go:noinline
+func (p Point) Project(a *Affine) (float32, float32) {
 	return a.A*p.X + a.C*p.Y + a.E, a.B*p.X + a.D*p.Y + a.F
 }
 
-func (m Move) Project(a Affine) (float32, float32) {
+func (p Point) ProjectInline(a *Affine) (float32, float32) {
+	return a.A*p.X + a.C*p.Y + a.E, a.B*p.X + a.D*p.Y + a.F
+}
+
+//go:noinline
+func (m Move) Project(a *Affine) (float32, float32) {
 	return a.A*m.X + a.C*m.Y, a.B*m.X + a.D*m.Y
 }
 
+func (m Move) ProjectInline(a *Affine) (float32, float32) {
+	return a.A*m.X + a.C*m.Y, a.B*m.X + a.D*m.Y
+}
+
+//go:noinline
 func (p Point) Add(m Move) Point {
 	return Point{X: p.X + m.X, Y: p.Y + m.Y}
 }
 
+func (p Point) AddInline(m Move) Point {
+	return Point{X: p.X + m.X, Y: p.Y + m.Y}
+}
+
+//go:noinline
 func (p Point) XY() (float32, float32) { return p.X, p.Y }
+
+//go:noinline
 func (m Move) XY() (float32, float32) { return m.X, m.Y }
 
-func (a Affine) PVec(v Vec) (float32, float32) {
+// type switch, then call inlineable function
+//go:noinline
+func (a *Affine) PVecInline(v Vec) (float32, float32) {
+	switch v := v.(type) {
+	case Point:
+		return v.ProjectInline(a)
+	case Move:
+		return v.ProjectInline(a)
+	}
+	return 0, 0
+}
+
+// type switch, then do the computation directly
+//go:noinline
+func (a *Affine) PVecHand(v Vec) (float32, float32) {
 	switch v := v.(type) {
 	case Point:
 		return a.A*v.X + a.C*v.Y + a.E, a.B*v.X + a.D*v.Y + a.F
@@ -53,16 +85,31 @@ func (a Affine) PVec(v Vec) (float32, float32) {
 	return 0, 0
 }
 
-func (a Affine) PVecInterface(v Vec) (float32, float32) {
+// type switch, then call non-inlineable concrete function
+//go:noinline
+func (a *Affine) PVecCall(v Vec) (float32, float32) {
+	switch v := v.(type) {
+	case Point:
+		return v.Project(a)
+	case Move:
+		return v.Project(a)
+	}
+	return 0, 0
+}
+
+// use interface to select implementation
+func (a *Affine) PVecInterface(v Vec) (float32, float32) {
 	return v.Project(a)
 }
 
 // Project applies the affine matrix.
+//go:noinline
 func (a Affine) Project(x0, y0 float32) (x1, y1 float32) {
 	return a.A*x0 + a.C*y0 + a.E, a.B*x0 + a.D*y0 + a.F
 }
 
 // Unproject reverses projection.
+//go:noinline
 func (a Affine) Unproject(x1, y1 float32) (x0, y0 float32) {
 	// subtract translation, multiply by inverse of upper left 2x2
 	d := (a.A * a.D) - (a.B * a.C)
@@ -71,6 +118,7 @@ func (a Affine) Unproject(x1, y1 float32) (x0, y0 float32) {
 }
 
 // Scale scales by X and Y.
+//go:noinline
 func (a *Affine) Scale(xs, ys float32) *Affine {
 	a.A, a.C, a.E = a.A*xs, a.C*xs, a.E*xs
 	a.B, a.D, a.F = a.B*ys, a.D*ys, a.F*ys
@@ -78,6 +126,7 @@ func (a *Affine) Scale(xs, ys float32) *Affine {
 }
 
 // Rotate rotates by an angle.
+//go:noinline
 func (a *Affine) Rotate(theta float32) *Affine {
 	s64, c64 := math.Sincos(float64(theta))
 	s, c := float32(s64), float32(c64)
@@ -86,6 +135,7 @@ func (a *Affine) Rotate(theta float32) *Affine {
 }
 
 // IdentityAffine yields the identity matrix.
+//go:noinline
 func IdentityAffine() Affine {
 	return Affine{A: 1, D: 1}
 }
